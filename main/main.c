@@ -18,6 +18,9 @@ const char* TAG = "SMART HOME";
 void connect_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
 void disconnect_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
 static httpd_handle_t start_webserver();
+esp_err_t common_handler(httpd_req_t* req);
+esp_err_t sensor_handler(httpd_req_t* req);
+esp_err_t output_handler(httpd_req_t* req);
 typedef struct rest_server_context {
     char base_path[MAX_FS_PATH_SIZE + 1];
     char scratch[SCRATCH_BUFSIZE];
@@ -78,10 +81,55 @@ static httpd_handle_t start_webserver(){
     
     if( httpd_start( &server_local, &config ) == ESP_OK ){
         ESP_LOGI(TAG, "Arrancando servidor web en el puerto: %i ", config.server_port);
+        //registrando URI comun para servir archivos
+        httpd_uri_t common_uri = {
+            .uri = "/*",
+            .method = HTTP_GET,
+            .handler = common_handler,
+            .user_ctx = ctx
+        };
 
+        //registrando URI para enviar informacion de los sensores (entradas)
+        httpd_uri_t data_uri = {
+            .uri = "/sensor",
+            .method = HTTP_GET,
+            .handler = sensor_handler,
+            .user_ctx = ctx
+        };
+
+        //registrando URI para obtener informacion de los relevadores (salidas)
+        httpd_uri_t data_uri = {
+            .uri = "/output",
+            .method = HTTP_POST,
+            .handler = output_handler,
+            .user_ctx = ctx
+        };
+
+        return server_local;
+    }
+    else{
+        ESP_LOGE(TAG, "Fallo en el arranque del servidor web en el puerto: %i ", config.server_port);
+        free(ctx); //can i free this variable always??? outside the else
     }
     
-    free(ctx);
     return NULL;
+}
+
+/*Su proposito es regresar los archivos que le pida el navegador
+ * 1. Determinar que archivo se esta solicitando 
+ * 2. Leer el archivo de la memoria flash
+ * 3. Enviarlo por el request de http, si es muy grande hacerlo por partes
+ */
+esp_err_t common_handler(httpd_req_t* req){
+
+}
+
+//Colectar informacion disponible de cada sensor y responder dichos datos al navegador/ cliente web
+esp_err_t sensor_handler(httpd_req_t* req){
+
+}
+
+//Guardar el estado del output que mando el navegador/cliente web, y actualizar el componente fisico
+esp_err_t output_handler(httpd_req_t* req){
 
 }
