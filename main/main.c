@@ -169,7 +169,6 @@ esp_err_t sensor_handler(httpd_req_t* req){
 
 //Guardar el estado del output que mando el navegador/cliente web, y actualizar el componente fisico
 esp_err_t output_handler(httpd_req_t* req){
-    //can i use this code here??
     int total_len = (int)req->content_len;
     int current_len = 0;
     char* buffer = ((rest_server_context_t*)(req->user_ctx))->scratch;
@@ -180,6 +179,7 @@ esp_err_t output_handler(httpd_req_t* req){
         return ESP_FAIL;
     }
 
+    //Como los datos que recibimos son mucho menores que el buffer scracth de 10Kbytes, podemos evitar este codigo y leer solo una vez sin el ciclo
     while( current_len < total_len ){
         received = httpd_req_recv(req, buffer + current_len, total_len);
         if( received <= 0 ){
@@ -188,7 +188,14 @@ esp_err_t output_handler(httpd_req_t* req){
         }
         current_len+=received;
     }
-
     buffer[total_len] = '\0';
+
+    int output_value = atoi(buffer);
+    ESP_LOGI(TAG, "La respuesta del request POST es %s and integer value is %d", buffer, output_value);
+
+    //Envia la respuesta por http
+    const char res[20] = "OK";
+    httpd_resp_sendstr(req, res);
+
     return ESP_OK;
 }
