@@ -1,5 +1,7 @@
 #include <stdio.h>
 
+#include "esp_system.h"
+#include "esp_random.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_http_server.h"
@@ -125,14 +127,68 @@ static httpd_handle_t start_webserver(){
  */
 esp_err_t common_handler(httpd_req_t* req){
 
+    return ESP_OK;
 }
 
 //Colectar informacion disponible de cada sensor y responder dichos datos al navegador/ cliente web
 esp_err_t sensor_handler(httpd_req_t* req){
 
+    uint32_t random_data = 0;
+    size_t hdr_len = httpd_req_get_url_query_len(req) + 1;
+
+    if ( hdr_len != 0 ){
+        char* sensor_type_buff = (char*) malloc(hdr_len * sizeof(char) );
+        httpd_req_get_url_query_str(req, sensor_type_buff, hdr_len);
+
+        char sensor_type[15];
+        sscanf(sensor_type_buff, "type=%s", sensor_type);
+
+        if( strcmp(sensor_type, "temp") == 0 ){
+            random_data = esp_random()%45;
+        }
+
+        if( strcmp(sensor_type, "humi") == 0 ){
+            random_data = esp_random()%100;   
+        }
+        ESP_LOGI(TAG, "El tipo de sensor es %s y el dato es %lu", sensor_type, random_data);
+        free(sensor_type_buff);
+    }
+    else
+        ESP_LOGE(TAG, "No hay query string params por leer");
+        //Can I send a 500 status error code and return ESP_FAIL
+
+    char data_response[20];
+    sprintf(data_response, "%lu", random_data);
+    ESP_LOGI(TAG, "La respuesta de temperatura es %s", data_response);
+
+    //Envia la respuesta por http
+    httpd_resp_sendstr(req, data_response);
+
+    return ESP_OK;
 }
 
 //Guardar el estado del output que mando el navegador/cliente web, y actualizar el componente fisico
 esp_err_t output_handler(httpd_req_t* req){
+    //can i use this code here??
+    int total_len = (int)req->content_len;
+    int current_len = 0;
+    char* buffer = ((rest_server_context_t*)(req->user_ctx))->scratch;
+    int received = 0;
 
+    if( total_len >= SCRATCH_BUFSIZE){
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Content too long");
+        return ESP_FAIL;
+    }
+
+    while( current_len < total_len ){
+        received = httpd_req_recv(req, buffer + current_len, total_len);
+        if( received <= 0 ){
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Content too long");
+            return ESP_FAIL;
+        }
+        current_len+=received;
+    }
+
+    buffer[total_len] = '\0';
+    return ESP_OK;
 }
