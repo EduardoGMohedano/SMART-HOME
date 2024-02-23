@@ -81,14 +81,6 @@ static httpd_handle_t start_webserver(){
     
     if( httpd_start( &server_local, &config ) == ESP_OK ){
         ESP_LOGI(TAG, "Arrancando servidor web en el puerto: %i ", config.server_port);
-        //registrando URI comun para servir archivos
-        httpd_uri_t common_uri = {
-            .uri = "/*",
-            .method = HTTP_GET,
-            .handler = common_handler,
-            .user_ctx = ctx
-        };
-
         //registrando URI para enviar informacion de los sensores (entradas)
         httpd_uri_t data_uri = {
             .uri = "/sensor",
@@ -96,14 +88,25 @@ static httpd_handle_t start_webserver(){
             .handler = sensor_handler,
             .user_ctx = ctx
         };
+        httpd_register_uri_handler(server_local, &data_uri);
 
         //registrando URI para obtener informacion de los relevadores (salidas)
-        httpd_uri_t data_uri = {
+        httpd_uri_t output_uri = {
             .uri = "/output",
             .method = HTTP_POST,
             .handler = output_handler,
             .user_ctx = ctx
         };
+        httpd_register_uri_handler(server_local, &output_uri);
+        
+        //registrando URI comun para servir archivos
+        httpd_uri_t common_uri = {
+            .uri = "/*",
+            .method = HTTP_GET,
+            .handler = common_handler,
+            .user_ctx = ctx
+        };
+        httpd_register_uri_handler(server_local, &common_uri);
 
         return server_local;
     }
