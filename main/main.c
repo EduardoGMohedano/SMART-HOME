@@ -1,5 +1,6 @@
 #include <stdio.h>
 
+#include "mbedtls/md5.h"
 #include "esp_system.h"
 #include "esp_random.h"
 #include "esp_log.h"
@@ -19,6 +20,7 @@
 const char* TAG = "SMART HOME";
 void connect_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
 void disconnect_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
+void compute_md5(const unsigned char* input, size_t ilen, unsigned char output[16]);
 static httpd_handle_t start_webserver();
 esp_err_t common_handler(httpd_req_t* req);
 esp_err_t sensor_handler(httpd_req_t* req);
@@ -49,6 +51,17 @@ void app_main(void){
     esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &disconnect_handler, &server);
 
     server = start_webserver();
+
+    unsigned char output[16];
+    const char* input = "hello world!";
+    compute_md5((unsigned char*)input, strlen(input), output);
+
+    ESP_LOGI(TAG," El resultado de hashear: %s con md5 es:", input);
+    for(int index = 0; index < 16; index++){
+        printf("%02x", output[index]);
+    }
+    printf("\n");
+
 }
 
 
@@ -198,4 +211,13 @@ esp_err_t output_handler(httpd_req_t* req){
     httpd_resp_sendstr(req, res);
 
     return ESP_OK;
+}
+
+void compute_md5(const unsigned char* input, size_t ilen, unsigned char output[16]){
+    mbedtls_md5_context ctx;
+    mbedtls_md5_init(&ctx);
+    mbedtls_md5_starts(&ctx);
+    mbedtls_md5_update(&ctx, input, ilen);
+    mbedtls_md5_finish(&ctx, output);
+    mbedtls_md5_free(&ctx);
 }
