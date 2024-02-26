@@ -1,5 +1,7 @@
 #include <stdio.h>
 
+#include <fcntl.h>
+#include "esp_vfs.h"
 #include "esp_system.h"
 #include "esp_random.h"
 #include "esp_log.h"
@@ -127,6 +129,46 @@ static httpd_handle_t start_webserver(){
  */
 esp_err_t common_handler(httpd_req_t* req){
 
+    char filepath[FILE_PATH_MAX];
+
+    rest_server_context_t* ctx = (rest_server_context_t*)req->user_ctx;
+    strlcpy( filepath, ctx->base_path, sizeof(filepath) );
+    ESP_LOGI(TAG, "El path del archivo solicitado es %s", filepath);
+
+    //Usando la uri y el filepath, determinar la ruta del archivo dentro del filesystem
+    if( req->uri[strlen(req->uri) - 1] == '/' )
+        strlcat(filepath, "/index.html", sizeof(filepath));
+    else
+        strlcat(filepath, req->uri, sizeof(filepath));
+
+    int fd = open(filepath, O_RDONLY, 0);
+    if( fd == -1){
+        ESP_LOGE(TAG,"No se pudo encontrar/abrir el archivo %s", filepath);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    char* chunk = ctx->scratch;
+    ssize_t read_bytes;
+
+    do{
+        read_bytes = read(fd, chunk, SCRATCH_BUFSIZE);
+        if( read_bytes == -1)
+            ESP_LOGE(TAG, "No se pudo leer el archivo %s", filepath);
+        else if( read_bytes > 0 ){
+            if ( httpd_resp_send_chunk(req, chunk, read_bytes) != ESP_OK){
+                ESP_LOGE(TAG, "No se pudo leer el archivo %s al cliente", filepath);
+                close(fd);
+                httpd_resp_sendstr_chunk(req, NULL);
+                httpd_resp_send_500(req);
+                return ESP_FAIL;
+            }
+        }
+    }while( read_bytes > 0 );
+
+
+    close(fd);
+    httpd_resp_send_chunk(req, NULL, 0);//puede esta linea ser sendstr???
     return ESP_OK;
 }
 
