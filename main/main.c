@@ -1,5 +1,5 @@
 #include <stdio.h>
-
+#include "esp_spiffs.h"
 #include <fcntl.h>
 #include "esp_vfs.h"
 #include "esp_system.h"
@@ -27,10 +27,12 @@ static esp_err_t set_content_type_from_file(httpd_req_t *req, const char *filepa
 esp_err_t common_handler(httpd_req_t* req);
 esp_err_t sensor_handler(httpd_req_t* req);
 esp_err_t output_handler(httpd_req_t* req);
+esp_err_t init_fs(const char* mount_path);
+
 typedef struct rest_server_context {
     char base_path[MAX_FS_PATH_SIZE + 1];
     char scratch[SCRATCH_BUFSIZE];
-} rest_server_context_t;//essta estructura permite relacionar el archivo que pide el servidor web con un buffer para enviarlo
+} rest_server_context_t;//esta estructura permite relacionar el archivo que pide el servidor web con un buffer para enviarlo
 
 void app_main(void){
 
@@ -53,6 +55,9 @@ void app_main(void){
     esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &disconnect_handler, &server);
 
     server = start_webserver();
+
+    char* base_path = FS_BASE_PATH;
+    init_fs(base_path);
 }
 
 
@@ -263,4 +268,28 @@ esp_err_t output_handler(httpd_req_t* req){
     httpd_resp_sendstr(req, res);
 
     return ESP_OK;
+}
+
+/* Inicializa el filesystem dentro de la memoria flash y montalo
+ * en caso de no tener paginas libres, se borra el contenido de esa region de memoria y se monta
+ */
+esp_err_t init_fs(const char* mount_path){
+
+    esp_vfs_spiffs_conf_t conf = {
+        .base_path = mount_path,
+        .partition_label = NULL,
+        .max_files = 3, //cantidad maxima de archivos que podemos abrir a la vez
+        .format_if_mount_failed = true
+    };
+
+    esp_err_t result = esp_vfs_spiffs_register(&conf);
+
+    if( result != ESP_OK){
+        if( result == ESP_FAIL )
+            ESP_LOGE(TAG, "Fallo el montaje del filesystem en el path %s", mount_path);
+        else
+            ESP_LOGE(TAG, "Fallo el montaje del filesystem con error (%s)", esp_err_to_name(result));
+    }
+
+    return result;
 }
