@@ -17,11 +17,13 @@
 #define SCRATCH_BUFSIZE         10240
 #define FILE_PATH_MAX           40
 #define FS_BASE_PATH            "/www"
+#define CHECK_FILE_EXTENSION(filename, ext) (strcasecmp(&filename[strlen(filename) - strlen(ext)], ext) == 0)
 
 const char* TAG = "SMART HOME";
 void connect_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
 void disconnect_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
 static httpd_handle_t start_webserver();
+static esp_err_t set_content_type_from_file(httpd_req_t *req, const char *filepath);
 esp_err_t common_handler(httpd_req_t* req);
 esp_err_t sensor_handler(httpd_req_t* req);
 esp_err_t output_handler(httpd_req_t* req);
@@ -122,6 +124,25 @@ static httpd_handle_t start_webserver(){
     return NULL;
 }
 
+/* Configura el tipo de archivo a retornar dependiendo de la extension */
+esp_err_t set_content_type_from_file(httpd_req_t *req, const char *filepath){
+    const char *type = "text/plain";
+    if (CHECK_FILE_EXTENSION(filepath, ".html")) {
+        type = "text/html";
+    } else if (CHECK_FILE_EXTENSION(filepath, ".js")) {
+        type = "application/javascript";
+    } else if (CHECK_FILE_EXTENSION(filepath, ".css")) {
+        type = "text/css";
+    } else if (CHECK_FILE_EXTENSION(filepath, ".png")) {
+        type = "image/png";
+    } else if (CHECK_FILE_EXTENSION(filepath, ".ico")) {
+        type = "image/x-icon";
+    } else if (CHECK_FILE_EXTENSION(filepath, ".svg")) {
+        type = "text/xml";
+    }
+    return httpd_resp_set_type(req, type);
+}
+
 /*Su proposito es regresar los archivos que le pida el navegador
  * 1. Determinar que archivo se esta solicitando 
  * 2. Leer el archivo de la memoria flash
@@ -147,6 +168,8 @@ esp_err_t common_handler(httpd_req_t* req){
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
+
+    set_content_type_from_file(req, filepath);
 
     char* chunk = ctx->scratch;
     ssize_t read_bytes;
