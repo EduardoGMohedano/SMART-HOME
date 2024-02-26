@@ -1,0 +1,16 @@
+/* style.css 
+body{
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background-color: #f0f0f0;
+    flex-direction: column;
+}*/
+  
+.gauge {
+    margin-bottom: 25px;
+    margin-top: 65px;
+    background-color: #ddd;
+    border-radius: 150px 150px 0 0;
+    font-size: 15%;
+}
