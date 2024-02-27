@@ -1,0 +1,12 @@
+menu "Smart Home Configuration"
+
+    config USER_NAME
+        string "User"
+        default "admin"
+    
+    config USER_PASSWORD
+        string "Password" 
+        default "smart-home"
+    
+endmenu
+    

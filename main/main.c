@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include "cJSON.h"
 #include "esp_spiffs.h"
 #include <fcntl.h>
 #include "esp_vfs.h"
@@ -17,6 +18,7 @@
 #define SCRATCH_BUFSIZE         10240
 #define FILE_PATH_MAX           40
 #define FS_BASE_PATH            "/www"
+#define USERS_SPACE             "storage"
 #define CHECK_FILE_EXTENSION(filename, ext) (strcasecmp(&filename[strlen(filename) - strlen(ext)], ext) == 0)
 
 const char* TAG = "SMART HOME";
@@ -27,6 +29,7 @@ static esp_err_t set_content_type_from_file(httpd_req_t *req, const char *filepa
 esp_err_t common_handler(httpd_req_t* req);
 esp_err_t sensor_handler(httpd_req_t* req);
 esp_err_t output_handler(httpd_req_t* req);
+esp_err_t auth_handler(httpd_req_t* req);
 esp_err_t init_fs(const char* mount_path);
 
 typedef struct rest_server_context {
@@ -43,6 +46,26 @@ void app_main(void){
     }
     ESP_ERROR_CHECK(ret);
 
+    //Guarda en la flash el usuario y contrasenia default para accesar a los recursos del servidor web
+    nvs_handle_t handle_nvs;
+    nvs_open(USERS_SPACE, NVS_READWRITE, &handle_nvs);
+    
+    //Si la primera vez regresa un size de 0 quiere decir que no se ha guardado el dato
+    size_t required_size = 0;
+    nvs_get_str(handle_nvs, "default_user", NULL, required_size);
+    if ( required_size == 0 ){
+        const char* user_name = CONFIG_USER_NAME;
+        nvs_set_str(handle_nvs, "default_user", user_name);
+    }
+    
+    nvs_get_str(handle_nvs, "default_pass", NULL, required_size);
+    if ( required_size == 0 ){
+        const char* pass_name = CONFIG_USER_PASSWORD;
+        nvs_set_str(handle_nvs, "default_pass", pass_name);
+    }
+    //Asegurandonos de que los cambios queden guardados en la flash
+    nvs_commit(handle_nvs);
+    nvs_close(handle_nvs);
 
     esp_netif_init();//inicializa la libreria de red que maneja todos los recursos de la libreria TCP/IP
     esp_event_loop_create_default(); //crea un loop de default que es el que se encarga de arrojar mensajes cuando adquirimos una ip el estado de wifi cambia
@@ -59,7 +82,6 @@ void app_main(void){
     char* base_path = FS_BASE_PATH;
     init_fs(base_path);
 }
-
 
 void connect_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data){
     httpd_handle_t* server = (httpd_handle_t*)arg;
@@ -109,6 +131,15 @@ static httpd_handle_t start_webserver(){
             .user_ctx = ctx
         };
         httpd_register_uri_handler(server_local, &output_uri);
+        
+        //registrando URI para autenticar usuarios
+        httpd_uri_t auth_uri = {
+            .uri = "/authentication",
+            .method = HTTP_POST,
+            .handler = auth_handler,
+            .user_ctx = ctx
+        };
+        httpd_register_uri_handler(server_local, &auth_uri);
         
         //registrando URI comun para servir archivos
         httpd_uri_t common_uri = {
@@ -267,6 +298,81 @@ esp_err_t output_handler(httpd_req_t* req){
     const char res[20] = "OK";
     httpd_resp_sendstr(req, res);
 
+    return ESP_OK;
+}
+
+/*
+ * Nos permitira validar que el usuario este validado para acceder a los recursos del servidor (sensores/actuadores) 
+ * y pagina web
+ */
+esp_err_t auth_handler(httpd_req_t* req){
+    char* buff = ((rest_server_context_t*)(req->user_ctx))->scratch; 
+    int received = 0;
+    received = httpd_req_recv(req, buff, req->content_len);
+
+    if( received <= 0){
+        ESP_LOGE(TAG, "El contenido del request no contiene datos");
+        return ESP_FAIL;
+    }
+    buff[req->content_len] = '\0'; //Is this really necessary?
+
+    const cJSON* root = cJSON_Parse(buff);
+    const cJSON* user = NULL;
+    const cJSON* hashed_pass = NULL;
+    
+    if( root == NULL){
+        ESP_LOGE(TAG, "The root JSON could not be parsed");
+        return ESP_FAIL;
+    }
+
+    user = cJSON_GetObjectItem(root, "user");
+    hashed_pass = cJSON_GetObjectItem(root, "pass");
+
+    cJSON* http_response = cJSON_CreateObject();
+
+    if( ( user->valuestring != NULL) && ( hashed_pass->valuestring != NULL)){
+        /*Abriendo la particion de memoria para leer el usuario y el hash de la contraseña para comparar con el request http*/
+        nvs_handle_t handle_nvs;
+        nvs_open(USERS_SPACE, NVS_READONLY, &handle_nvs);
+        
+        size_t required_size = 0;
+        nvs_get_str(handle_nvs, "default_user", NULL, &required_size);
+        char* user_buff = (char*) malloc(sizeof(char)*required_size);
+        nvs_get_str(handle_nvs, "default_user", user_buff, &required_size);
+        
+        required_size = 0;
+        nvs_get_str(handle_nvs, "default_pass", NULL, &required_size);
+        char* pass_buff = (char*) malloc(sizeof(char)*required_size);
+        nvs_get_str(handle_nvs, "default_pass", pass_buff, &required_size);
+        nvs_close(handle_nvs);
+
+        if( (strcmp(user_buff, user->valuestring) == 0) && (strcmp(pass_buff, hashed_pass->valuestring) == 0)){
+            ESP_LOGI(TAG, "The user and pass stored are %s %s and the req %s %s", user_buff, pass_buff, user->valuestring, hashed_pass->valuestring);
+            const char* http_ok = "ESP_OK";
+            cJSON_AddStringToObject(http_response, "response", http_ok);
+            //cJSON_AddItemToObject(http_response, "response", cJSON_CreateString(http_ok));
+        }
+        else{
+            ESP_LOGE(TAG, "El usuario no se pudo autenticar usuario/password incorrecto");
+            const char* http_fail = "ESP_FAIL";
+            cJSON_AddStringToObject(http_response, "response", http_fail);
+        }
+     
+        char* http_response_str = cJSON_Print(http_response);
+        ESP_LOGI(TAG, "HTTP response %s", http_response_str);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, http_response_str);
+        
+        free(user_buff);
+        free(pass_buff);
+    } 
+    else{
+        ESP_LOGE(TAG, "El usuario no se pudo autenticar");
+        httpd_resp_send_500(req);
+    }
+    
+    cJSON_Delete(http_response);
+    cJSON_Delete(root);
     return ESP_OK;
 }
 
