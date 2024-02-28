@@ -1,4 +1,6 @@
 #include <stdio.h>
+#include "mdns.h"
+#include "lwip/apps/netbiosns.h"
 #include "cJSON.h"
 #include "esp_spiffs.h"
 #include <fcntl.h>
@@ -20,6 +22,7 @@
 #define FILE_PATH_MAX           40
 #define FS_BASE_PATH            "/www"
 #define USERS_SPACE             "storage"
+#define DNS_LOCAL_NAME          "esp-home"        
 #define CHECK_FILE_EXTENSION(filename, ext) (strcasecmp(&filename[strlen(filename) - strlen(ext)], ext) == 0)
 
 const char* TAG = "SMART HOME";
@@ -33,6 +36,7 @@ esp_err_t sensor_handler(httpd_req_t* req);
 esp_err_t output_handler(httpd_req_t* req);
 esp_err_t auth_handler(httpd_req_t* req);
 esp_err_t init_fs(const char* mount_path);
+void init_mdns(void);
 
 typedef struct rest_server_context {
     char base_path[MAX_FS_PATH_SIZE + 1];
@@ -80,6 +84,10 @@ void app_main(void){
     //Asegurandonos de que los cambios queden guardados en la flash
     nvs_commit(handle_nvs);
     nvs_close(handle_nvs);
+
+    init_mdns();
+    netbiosns_init();
+    netbiosns_set_name(DNS_LOCAL_NAME);
 
     esp_netif_init();//inicializa la libreria de red que maneja todos los recursos de la libreria TCP/IP
     esp_event_loop_create_default(); //crea un loop de default que es el que se encarga de arrojar mensajes cuando adquirimos una ip el estado de wifi cambia
@@ -422,4 +430,19 @@ void compute_md5(const unsigned char* input, size_t ilen, unsigned char output[1
     mbedtls_md5_update(&ctx, input, ilen);
     mbedtls_md5_finish(&ctx, output);
     mbedtls_md5_free(&ctx);
+}
+
+/* Esta API nos va a permitir inicializar el servicio de Multicast DNS
+ * La instancia de nuestro hostname sera indicada en hostname_set()
+ */
+void init_mdns(void){
+    mdns_init();
+    mdns_hostname_set(DNS_LOCAL_NAME);
+
+    mdns_txt_item_t serviceData[] = {
+        {"board", "esp32"},
+        {"path","/"}
+    };
+
+    mdns_service_add("ESP32-WebServer", "_http", "_tcp", 80, serviceData, sizeof(serviceData)/sizeof(serviceData[0]));
 }
