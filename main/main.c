@@ -3,6 +3,7 @@
 #include "esp_spiffs.h"
 #include <fcntl.h>
 #include "esp_vfs.h"
+#include "mbedtls/md5.h"
 #include "esp_system.h"
 #include "esp_random.h"
 #include "esp_log.h"
@@ -24,6 +25,7 @@
 const char* TAG = "SMART HOME";
 void connect_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
 void disconnect_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
+void compute_md5(const unsigned char* input, size_t ilen, unsigned char output[16]);
 static httpd_handle_t start_webserver();
 static esp_err_t set_content_type_from_file(httpd_req_t *req, const char *filepath);
 esp_err_t common_handler(httpd_req_t* req);
@@ -61,7 +63,19 @@ void app_main(void){
     nvs_get_str(handle_nvs, "default_pass", NULL, required_size);
     if ( required_size == 0 ){
         const char* pass_name = CONFIG_USER_PASSWORD;
-        nvs_set_str(handle_nvs, "default_pass", pass_name);
+        unsigned char pass_name_hash[16];
+        compute_md5((unsigned char*)pass_name, strlen(pass_name), pass_name_hash);
+        char hashed_pass[17];
+        memset(hashed_pass, 0 , 17);
+        char tmp[4];
+
+        for(int index = 0; index < 16; index++){
+            memset(tmp, 0 , 4);
+            sprintf(tmp, "%02x", pass_name_hash[index]);
+            strcat(hashed_pass, tmp);
+        }
+
+        nvs_set_str(handle_nvs, "default_pass", hashed_pass);
     }
     //Asegurandonos de que los cambios queden guardados en la flash
     nvs_commit(handle_nvs);
@@ -78,6 +92,8 @@ void app_main(void){
     esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &disconnect_handler, &server);
 
     server = start_webserver();
+
+
 
     char* base_path = FS_BASE_PATH;
     init_fs(base_path);
@@ -347,10 +363,9 @@ esp_err_t auth_handler(httpd_req_t* req){
         nvs_close(handle_nvs);
 
         if( (strcmp(user_buff, user->valuestring) == 0) && (strcmp(pass_buff, hashed_pass->valuestring) == 0)){
-            ESP_LOGI(TAG, "The user and pass stored are %s %s and the req %s %s", user_buff, pass_buff, user->valuestring, hashed_pass->valuestring);
+            ESP_LOGI(TAG, " El usuario ha sido autenticado correctamente");
             const char* http_ok = "ESP_OK";
             cJSON_AddStringToObject(http_response, "response", http_ok);
-            //cJSON_AddItemToObject(http_response, "response", cJSON_CreateString(http_ok));
         }
         else{
             ESP_LOGE(TAG, "El usuario no se pudo autenticar usuario/password incorrecto");
@@ -398,4 +413,13 @@ esp_err_t init_fs(const char* mount_path){
     }
 
     return result;
+}
+
+void compute_md5(const unsigned char* input, size_t ilen, unsigned char output[16]){
+    mbedtls_md5_context ctx;
+    mbedtls_md5_init(&ctx);
+    mbedtls_md5_starts(&ctx);
+    mbedtls_md5_update(&ctx, input, ilen);
+    mbedtls_md5_finish(&ctx, output);
+    mbedtls_md5_free(&ctx);
 }
