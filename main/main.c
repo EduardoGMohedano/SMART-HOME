@@ -22,6 +22,8 @@
 #define FILE_PATH_MAX           40
 #define FS_BASE_PATH            "/www"
 #define USERS_SPACE             "storage"
+#define KEY_USER_NAME           "default_user" 
+#define KEY_PASS_NAME           "default_pass" 
 #define DNS_LOCAL_NAME          "esp-home"        
 #define CHECK_FILE_EXTENSION(filename, ext) (strcasecmp(&filename[strlen(filename) - strlen(ext)], ext) == 0)
 
@@ -58,13 +60,13 @@ void app_main(void){
     
     //Si la primera vez regresa un size de 0 quiere decir que no se ha guardado el dato
     size_t required_size = 0;
-    nvs_get_str(handle_nvs, "default_user", NULL, required_size);
+    nvs_get_str(handle_nvs, KEY_USER_NAME, NULL, required_size);
     if ( required_size == 0 ){
         const char* user_name = CONFIG_USER_NAME;
-        nvs_set_str(handle_nvs, "default_user", user_name);
+        nvs_set_str(handle_nvs, KEY_USER_NAME, user_name);
     }
     
-    nvs_get_str(handle_nvs, "default_pass", NULL, required_size);
+    nvs_get_str(handle_nvs, KEY_PASS_NAME, NULL, required_size);
     if ( required_size == 0 ){
         const char* pass_name = CONFIG_USER_PASSWORD;
         unsigned char pass_name_hash[16];
@@ -79,7 +81,7 @@ void app_main(void){
             strcat(hashed_pass, tmp);
         }
 
-        nvs_set_str(handle_nvs, "default_pass", hashed_pass);
+        nvs_set_str(handle_nvs, KEY_PASS_NAME, hashed_pass);
     }
     //Asegurandonos de que los cambios queden guardados en la flash
     nvs_commit(handle_nvs);
@@ -249,7 +251,6 @@ esp_err_t common_handler(httpd_req_t* req){
         }
     }while( read_bytes > 0 );
 
-
     close(fd);
     httpd_resp_send_chunk(req, NULL, 0);//puede esta linea ser sendstr???
     return ESP_OK;
@@ -278,10 +279,12 @@ esp_err_t sensor_handler(httpd_req_t* req){
         ESP_LOGI(TAG, "El tipo de sensor es %s y el dato es %lu", sensor_type, random_data);
         free(sensor_type_buff);
     }
-    else
+    else{
         ESP_LOGE(TAG, "No hay query string params por leer");
-        //Can I send a 500 status error code and return ESP_FAIL
-
+        httpd_resp_send_500(req); //send a 500 status error code and return ESP_FAIL
+        return ESP_FAIL;
+    }
+        
     char data_response[20];
     sprintf(data_response, "%lu", random_data);
     ESP_LOGI(TAG, "La respuesta de temperatura es %s", data_response);
@@ -319,7 +322,7 @@ esp_err_t output_handler(httpd_req_t* req){
     ESP_LOGI(TAG, "La respuesta del request POST es %s and integer value is %d", buffer, output_value);
 
     //Envia la respuesta por http
-    const char res[20] = "OK";
+    const char res[] = "OK";
     httpd_resp_sendstr(req, res);
 
     return ESP_OK;
@@ -338,7 +341,7 @@ esp_err_t auth_handler(httpd_req_t* req){
         ESP_LOGE(TAG, "El contenido del request no contiene datos");
         return ESP_FAIL;
     }
-    buff[req->content_len] = '\0'; //Is this really necessary?
+    buff[req->content_len] = '\0'; //necesario para usarlo en la funcion JSON parse
 
     const cJSON* root = cJSON_Parse(buff);
     const cJSON* user = NULL;
@@ -360,14 +363,14 @@ esp_err_t auth_handler(httpd_req_t* req){
         nvs_open(USERS_SPACE, NVS_READONLY, &handle_nvs);
         
         size_t required_size = 0;
-        nvs_get_str(handle_nvs, "default_user", NULL, &required_size);
+        nvs_get_str(handle_nvs, KEY_USER_NAME, NULL, &required_size);
         char* user_buff = (char*) malloc(sizeof(char)*required_size);
-        nvs_get_str(handle_nvs, "default_user", user_buff, &required_size);
+        nvs_get_str(handle_nvs, KEY_USER_NAME, user_buff, &required_size);
         
         required_size = 0;
-        nvs_get_str(handle_nvs, "default_pass", NULL, &required_size);
+        nvs_get_str(handle_nvs, KEY_PASS_NAME, NULL, &required_size);
         char* pass_buff = (char*) malloc(sizeof(char)*required_size);
-        nvs_get_str(handle_nvs, "default_pass", pass_buff, &required_size);
+        nvs_get_str(handle_nvs, KEY_PASS_NAME, pass_buff, &required_size);
         nvs_close(handle_nvs);
 
         if( (strcmp(user_buff, user->valuestring) == 0) && (strcmp(pass_buff, hashed_pass->valuestring) == 0)){
@@ -376,18 +379,18 @@ esp_err_t auth_handler(httpd_req_t* req){
             cJSON_AddStringToObject(http_response, "response", http_ok);
         }
         else{
-            ESP_LOGE(TAG, "El usuario no se pudo autenticar usuario/password incorrecto");
+            ESP_LOGE(TAG, "El usuario no se pudo autenticar, usuario/password incorrecto");
             const char* http_fail = "ESP_FAIL";
             cJSON_AddStringToObject(http_response, "response", http_fail);
         }
      
         char* http_response_str = cJSON_Print(http_response);
-        ESP_LOGI(TAG, "HTTP response %s", http_response_str);
         httpd_resp_set_type(req, "application/json");
         httpd_resp_sendstr(req, http_response_str);
         
         free(user_buff);
         free(pass_buff);
+        http_response_str = NULL;
     } 
     else{
         ESP_LOGE(TAG, "El usuario no se pudo autenticar");
@@ -423,6 +426,10 @@ esp_err_t init_fs(const char* mount_path){
     return result;
 }
 
+/*
+ * Esta API nos va a permitir calcular el hash de la contraseña que 
+ * guardaremos en la flash con MD5.
+ */
 void compute_md5(const unsigned char* input, size_t ilen, unsigned char output[16]){
     mbedtls_md5_context ctx;
     mbedtls_md5_init(&ctx);
