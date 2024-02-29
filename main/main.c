@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include "driver/gpio.h"
+#include "aht20.h"
+#include "driver/i2c.h"
 #include "mdns.h"
 #include "lwip/apps/netbiosns.h"
 #include "cJSON.h"
@@ -8,7 +10,6 @@
 #include "esp_vfs.h"
 #include "mbedtls/md5.h"
 #include "esp_system.h"
-#include "esp_random.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_http_server.h"
@@ -26,6 +27,11 @@
 #define KEY_USER_NAME           "default_user" 
 #define KEY_PASS_NAME           "default_pass" 
 #define DNS_LOCAL_NAME          "esp-home"        
+#define I2C_SCL_PIN             GPIO_NUM_22   
+#define I2C_SDA_PIN             GPIO_NUM_21   
+#define I2C_MASTER_NUM          I2C_NUM_0       
+#define I2C_MASTER_FREQ_HZ      100000     //Frecuencia de reloj I2C en Hertz              
+
 #define CHECK_FILE_EXTENSION(filename, ext) (strcasecmp(&filename[strlen(filename) - strlen(ext)], ext) == 0)
 
 const char* TAG = "SMART HOME";
@@ -40,7 +46,9 @@ esp_err_t output_handler(httpd_req_t* req);
 esp_err_t auth_handler(httpd_req_t* req);
 esp_err_t init_fs(const char* mount_path);
 void init_mdns(void);
+void i2c_bus_init(void);
 
+static aht20_dev_handle_t aht20 = NULL;
 typedef struct rest_server_context {
     char base_path[MAX_FS_PATH_SIZE + 1];
     char scratch[SCRATCH_BUFSIZE];
@@ -108,6 +116,13 @@ void app_main(void){
     init_fs(base_path);
 
     gpio_set_direction(GPIO_NUM_2, GPIO_MODE_OUTPUT);
+    
+    aht20_i2c_config_t i2c_conf = {
+        .i2c_port = I2C_MASTER_NUM,
+        .i2c_addr = AHT20_ADDRRES_0,
+    };
+    i2c_bus_init();
+    aht20_new_sensor(&i2c_conf, &aht20);
 }
 
 void connect_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data){
@@ -260,7 +275,11 @@ esp_err_t common_handler(httpd_req_t* req){
 //Colectar informacion disponible de cada sensor y responder dichos datos al navegador/ cliente web
 esp_err_t sensor_handler(httpd_req_t* req){
 
-    uint32_t random_data = 0;
+    float response_data = 0.0;
+    uint32_t temperature_raw;
+    uint32_t humidity_raw;
+    float temperature;
+    float humidity;
     size_t hdr_len = httpd_req_get_url_query_len(req) + 1;
 
     if ( hdr_len != 0 ){
@@ -271,13 +290,15 @@ esp_err_t sensor_handler(httpd_req_t* req){
         sscanf(sensor_type_buff, "type=%s", sensor_type);
 
         if( strcmp(sensor_type, "temp") == 0 ){
-            random_data = esp_random()%45;
+            aht20_read_temperature_humidity(aht20, &temperature_raw, &temperature, &humidity_raw, &humidity);
+            response_data = temperature;
         }
 
         if( strcmp(sensor_type, "humi") == 0 ){
-            random_data = esp_random()%100;   
+            aht20_read_temperature_humidity(aht20, &temperature_raw, &temperature, &humidity_raw, &humidity);
+            response_data = humidity;   
         }
-        ESP_LOGI(TAG, "El tipo de sensor es %s y el dato es %lu", sensor_type, random_data);
+        ESP_LOGI(TAG, "El tipo de sensor es %s y el dato es %2.2f", sensor_type, response_data);
         free(sensor_type_buff);
     }
     else{
@@ -287,7 +308,7 @@ esp_err_t sensor_handler(httpd_req_t* req){
     }
         
     char data_response[20];
-    sprintf(data_response, "%lu", random_data);
+    sprintf(data_response, "%2.2f", response_data);
     ESP_LOGI(TAG, "La respuesta de temperatura es %s", data_response);
 
     //Envia la respuesta por http
@@ -454,4 +475,20 @@ void init_mdns(void){
     };
 
     mdns_service_add("ESP32-WebServer", "_http", "_tcp", 80, serviceData, sizeof(serviceData)/sizeof(serviceData[0]));
+}
+
+void i2c_bus_init(void){
+    const i2c_config_t i2c_conf = {
+        .mode = I2C_MODE_MASTER,
+        .sda_io_num = I2C_SDA_PIN,
+        .sda_pullup_en = GPIO_PULLUP_ENABLE,
+        .scl_io_num = I2C_SCL_PIN,
+        .scl_pullup_en = GPIO_PULLUP_ENABLE,
+        .master.clk_speed = I2C_MASTER_FREQ_HZ
+    };
+    esp_err_t ret = i2c_param_config(I2C_MASTER_NUM, &i2c_conf);
+    ESP_ERROR_CHECK(ret);
+
+    ret = i2c_driver_install(I2C_MASTER_NUM, i2c_conf.mode, 0, 0, 0);
+    ESP_ERROR_CHECK(ret);
 }

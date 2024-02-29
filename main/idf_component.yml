@@ -1,5 +1,6 @@
 ## IDF Component Manager Manifest File
 dependencies:
+  espressif/aht20: "^0.1.0~1"
   espressif/mdns: "^1.2.4"
   ## Required IDF version
   idf:
