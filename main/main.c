@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include "driver/gpio.h"
 #include "mdns.h"
 #include "lwip/apps/netbiosns.h"
 #include "cJSON.h"
@@ -102,11 +103,11 @@ void app_main(void){
     esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &disconnect_handler, &server);
 
     server = start_webserver();
-
-
-
+    
     char* base_path = FS_BASE_PATH;
     init_fs(base_path);
+
+    gpio_set_direction(GPIO_NUM_2, GPIO_MODE_OUTPUT);
 }
 
 void connect_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data){
@@ -319,6 +320,7 @@ esp_err_t output_handler(httpd_req_t* req){
     buffer[total_len] = '\0';
 
     int output_value = atoi(buffer);
+    gpio_set_level(GPIO_NUM_2, output_value);
     ESP_LOGI(TAG, "La respuesta del request POST es %s and integer value is %d", buffer, output_value);
 
     //Envia la respuesta por http
