@@ -1,0 +1,3 @@
+[submodule "ESP32_WEB_UI"]
+	path = ESP32_WEB_UI
+	url = https://github.com/EduardoGMohedano/ESP32_WEB_UI.git
