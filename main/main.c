@@ -115,7 +115,7 @@ void app_main(void){
     char* base_path = FS_BASE_PATH;
     init_fs(base_path);
 
-    gpio_set_direction(GPIO_NUM_2, GPIO_MODE_OUTPUT);
+    gpio_set_direction(GPIO_NUM_16, GPIO_MODE_OUTPUT);
     
     aht20_i2c_config_t i2c_conf = {
         .i2c_port = I2C_MASTER_NUM,
@@ -341,7 +341,7 @@ esp_err_t output_handler(httpd_req_t* req){
     buffer[total_len] = '\0';
 
     int output_value = atoi(buffer);
-    gpio_set_level(GPIO_NUM_2, output_value);
+    gpio_set_level(GPIO_NUM_16, output_value);
     ESP_LOGI(TAG, "La respuesta del request POST es %s and integer value is %d", buffer, output_value);
 
     //Envia la respuesta por http
